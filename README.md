@@ -87,4 +87,7 @@ Connect to `http://127.0.0.1:3940/mcp` with header
 ## Tools
 
 `get_playback_state`, `play_video`, `play_playlist`, `pause`, `resume`, `next`,
-`previous`, `seek`, `set_volume`, `mute`, `unmute`.
+`previous`, `seek`, `set_volume`, `mute`, `unmute`, `set_loop`.
+
+`play_video` and `play_playlist` accept `loop=true` to repeat infinitely;
+`set_loop(enabled)` toggles looping on whatever is currently playing.
