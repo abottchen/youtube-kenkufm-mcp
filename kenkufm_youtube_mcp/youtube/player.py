@@ -66,12 +66,7 @@ def js_call(body: str) -> str:
             f" {body} }})()")
 
 
-def js_load_video(video_id: str, start_seconds: int | None, loop: bool = False) -> str:
-    if loop:
-        start = "" if start_seconds is None else f", {int(start_seconds)}"
-        return js_call(
-            f"p.loadPlaylist(['{video_id}'], 0{start}); p.setLoop(true); return {{found:true}};"
-        )
+def js_load_video(video_id: str, start_seconds: int | None) -> str:
     args = "{videoId: '%s'%s}" % (
         video_id,
         "" if start_seconds is None else f", startSeconds: {int(start_seconds)}",
@@ -91,16 +86,19 @@ def js_load_playlist(list_id: str, index: int | None, start_seconds: int | None,
 
 
 def js_set_loop(enabled: bool) -> str:
-    if not enabled:
-        return js_call("p.setLoop(false); return {found:true};")
+    # A single video is looped via the HTML5 media element's `loop` property
+    # (setLoop only loops a real, multi-item playlist and is a no-op on one video
+    # — verified against the live watch-page player). A real playlist keeps the
+    # native setLoop so the whole sequence repeats.
+    flag = "true" if enabled else "false"
     body = (
-        "const pl = (p.getPlaylist && p.getPlaylist()) || [];"
-        " if (pl.length > 0) { p.setLoop(true); return {found:true}; }"
+        "const v = document.querySelector('video');"
+        " const pl = (p.getPlaylist && p.getPlaylist()) || [];"
+        f" if (pl.length > 1) {{ p.setLoop({flag}); if (v) v.loop = false; return {{found:true}}; }}"
+        " if (!v) return {found:true, noVideo:true};"
         " const d = p.getVideoData ? (p.getVideoData() || {}) : {};"
-        " const id = d.video_id;"
-        " if (!id) return {found:true, noVideo:true};"
-        " const t = p.getCurrentTime ? p.getCurrentTime() : 0;"
-        " p.loadPlaylist([id], 0, t); p.setLoop(true); return {found:true};"
+        " if (!d.video_id) return {found:true, noVideo:true};"
+        f" v.loop = {flag}; return {{found:true}};"
     )
     return js_call(body)
 
@@ -147,9 +145,14 @@ async def get_state(cfg: Config) -> dict:
 
 async def play_video(cfg: Config, video_id: str, start_seconds: int | None = None,
                      loop: bool = False) -> dict:
-    await _eval(cfg, js_load_video(video_id, start_seconds, loop))
+    await _eval(cfg, js_load_video(video_id, start_seconds))
     await asyncio.sleep(0.6)  # let the SPA swap in the new video before reading
-    return await get_state(cfg)
+    state = await get_state(cfg)
+    if loop:
+        # Set video.loop only after the player is ready — loadVideoById resets
+        # the media element's loop flag while the new video is loading.
+        await _eval(cfg, js_set_loop(True))
+    return state
 
 
 async def play_playlist(cfg: Config, list_id: str, index: int | None = None,
@@ -163,7 +166,6 @@ async def set_loop(cfg: Config, enabled: bool) -> dict:
     result = await _eval(cfg, js_set_loop(enabled))
     if isinstance(result, dict) and result.get("noVideo"):
         raise InvalidInputError("No video is currently loaded to loop.")
-    await asyncio.sleep(0.6)  # enabling on a single video reloads it as a playlist
     return {**(await get_state(cfg)), "loop": enabled}
 
 

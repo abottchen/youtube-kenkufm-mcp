@@ -31,19 +31,12 @@ def test_js_load_video_contains_id_and_start():
     js = player.js_load_video("DyhYzRRMBSU", 30)
     assert "loadVideoById" in js and "DyhYzRRMBSU" in js and "startSeconds: 30" in js
 
-def test_js_load_video_loop_uses_playlist_and_setloop():
-    js = player.js_load_video("DyhYzRRMBSU", None, loop=True)
-    assert "loadPlaylist(['DyhYzRRMBSU'], 0" in js
-    assert "setLoop(true)" in js
-    assert "loadVideoById" not in js
-
-def test_js_load_video_loop_includes_start_seconds():
-    js = player.js_load_video("DyhYzRRMBSU", 30, loop=True)
-    assert "loadPlaylist(['DyhYzRRMBSU'], 0, 30)" in js
-
-def test_js_load_video_no_loop_unchanged():
+def test_js_load_video_never_uses_playlist():
+    # Single-video load must not go through loadPlaylist (that mechanism does not
+    # loop on the real watch page and can wedge the player with api.invalidparam).
     js = player.js_load_video("DyhYzRRMBSU", 30)
-    assert "loadVideoById" in js and "setLoop" not in js
+    assert "loadVideoById" in js
+    assert "loadPlaylist" not in js
 
 def test_js_load_playlist_loop_appends_setloop():
     js = player.js_load_playlist("PLabc123", None, None, loop=True)
@@ -53,16 +46,24 @@ def test_js_load_playlist_no_loop_has_no_setloop():
     js = player.js_load_playlist("PLabc123", None, None)
     assert "setLoop" not in js
 
-def test_js_set_loop_true_branches_playlist_and_video():
+def test_js_set_loop_true_single_video_uses_video_loop():
+    # A single video loops via the HTML5 media element, never loadPlaylist.
     js = player.js_set_loop(True)
-    assert "getPlaylist" in js
-    assert "setLoop(true)" in js
-    assert "loadPlaylist([id], 0" in js
+    assert "v.loop = true" in js
+    assert "loadPlaylist" not in js
     assert "noVideo" in js
 
-def test_js_set_loop_false_disables():
+def test_js_set_loop_true_real_playlist_uses_setloop():
+    # A real (multi-item) playlist loops via native setLoop.
+    js = player.js_set_loop(True)
+    assert "getPlaylist" in js
+    assert "pl.length > 1" in js
+    assert "p.setLoop(true)" in js
+
+def test_js_set_loop_false_disables_both_paths():
     js = player.js_set_loop(False)
-    assert "setLoop(false)" in js
+    assert "v.loop = false" in js
+    assert "p.setLoop(false)" in js
     assert "loadPlaylist" not in js
 
 def test_js_set_volume_coerces_int():
@@ -87,7 +88,7 @@ async def test_play_video_loads_then_reads_state(monkeypatch):
     assert out["state"] == "playing"
     assert any("loadVideoById" in c for c in calls)
 
-async def test_play_video_loop_uses_setloop(monkeypatch):
+async def test_play_video_loop_sets_video_loop(monkeypatch):
     calls = []
     async def fake_eval(cfg, expression, **kw):
         calls.append(expression)
@@ -98,7 +99,21 @@ async def test_play_video_loop_uses_setloop(monkeypatch):
     monkeypatch.setattr(player.asyncio, "sleep", no_sleep)
 
     await player.play_video(CFG, "DyhYzRRMBSU", loop=True)
-    assert any("setLoop(true)" in c for c in calls)
+    assert any("loadVideoById" in c for c in calls)  # reliable load path
+    assert any("v.loop = true" in c for c in calls)   # loop applied after load
+
+async def test_play_video_no_loop_skips_loop_eval(monkeypatch):
+    calls = []
+    async def fake_eval(cfg, expression, **kw):
+        calls.append(expression)
+        return {"found": True, "state": 1, "videoId": "DyhYzRRMBSU",
+                "isPlayable": True, "errorCode": None}
+    monkeypatch.setattr(player, "_eval", fake_eval)
+    async def no_sleep(*a, **k): return None
+    monkeypatch.setattr(player.asyncio, "sleep", no_sleep)
+
+    await player.play_video(CFG, "DyhYzRRMBSU", loop=False)
+    assert not any("v.loop" in c for c in calls)
 
 async def test_play_playlist_loop_uses_setloop(monkeypatch):
     calls = []
@@ -113,17 +128,30 @@ async def test_play_playlist_loop_uses_setloop(monkeypatch):
     await player.play_playlist(CFG, "PLabc123", loop=True)
     assert any("setLoop(true)" in c for c in calls)
 
-async def test_set_loop_echoes_enabled(monkeypatch):
+async def test_set_loop_echoes_enabled_and_builds_video_loop(monkeypatch):
+    calls = []
     async def fake_eval(cfg, expression, **kw):
+        calls.append(expression)
         return {"found": True, "state": 1, "videoId": "abc",
                 "isPlayable": True, "errorCode": None}
     monkeypatch.setattr(player, "_eval", fake_eval)
-    async def no_sleep(*a, **k): return None
-    monkeypatch.setattr(player.asyncio, "sleep", no_sleep)
 
     out = await player.set_loop(CFG, True)
     assert out["loop"] is True
     assert out["state"] == "playing"
+    assert any("v.loop = true" in c for c in calls)  # confirms set_loop -> js_set_loop
+
+async def test_set_loop_disable_builds_video_loop_false(monkeypatch):
+    calls = []
+    async def fake_eval(cfg, expression, **kw):
+        calls.append(expression)
+        return {"found": True, "state": 2, "videoId": "abc",
+                "isPlayable": True, "errorCode": None}
+    monkeypatch.setattr(player, "_eval", fake_eval)
+
+    out = await player.set_loop(CFG, False)
+    assert out["loop"] is False
+    assert any("v.loop = false" in c for c in calls)
 
 async def test_set_loop_no_video_raises(monkeypatch):
     async def fake_eval(cfg, expression, **kw):
