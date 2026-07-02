@@ -31,6 +31,40 @@ def test_js_load_video_contains_id_and_start():
     js = player.js_load_video("DyhYzRRMBSU", 30)
     assert "loadVideoById" in js and "DyhYzRRMBSU" in js and "startSeconds: 30" in js
 
+def test_js_load_video_loop_uses_playlist_and_setloop():
+    js = player.js_load_video("DyhYzRRMBSU", None, loop=True)
+    assert "loadPlaylist(['DyhYzRRMBSU'], 0" in js
+    assert "setLoop(true)" in js
+    assert "loadVideoById" not in js
+
+def test_js_load_video_loop_includes_start_seconds():
+    js = player.js_load_video("DyhYzRRMBSU", 30, loop=True)
+    assert "loadPlaylist(['DyhYzRRMBSU'], 0, 30)" in js
+
+def test_js_load_video_no_loop_unchanged():
+    js = player.js_load_video("DyhYzRRMBSU", 30)
+    assert "loadVideoById" in js and "setLoop" not in js
+
+def test_js_load_playlist_loop_appends_setloop():
+    js = player.js_load_playlist("PLabc123", None, None, loop=True)
+    assert "loadPlaylist" in js and "setLoop(true)" in js
+
+def test_js_load_playlist_no_loop_has_no_setloop():
+    js = player.js_load_playlist("PLabc123", None, None)
+    assert "setLoop" not in js
+
+def test_js_set_loop_true_branches_playlist_and_video():
+    js = player.js_set_loop(True)
+    assert "getPlaylist" in js
+    assert "setLoop(true)" in js
+    assert "loadPlaylist([id], 0" in js
+    assert "noVideo" in js
+
+def test_js_set_loop_false_disables():
+    js = player.js_set_loop(False)
+    assert "setLoop(false)" in js
+    assert "loadPlaylist" not in js
+
 def test_js_set_volume_coerces_int():
     assert "setVolume(50)" in player.js_set_volume(50)
 

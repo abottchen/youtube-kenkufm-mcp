@@ -66,7 +66,12 @@ def js_call(body: str) -> str:
             f" {body} }})()")
 
 
-def js_load_video(video_id: str, start_seconds: int | None) -> str:
+def js_load_video(video_id: str, start_seconds: int | None, loop: bool = False) -> str:
+    if loop:
+        start = "" if start_seconds is None else f", {int(start_seconds)}"
+        return js_call(
+            f"p.loadPlaylist(['{video_id}'], 0{start}); p.setLoop(true); return {{found:true}};"
+        )
     args = "{videoId: '%s'%s}" % (
         video_id,
         "" if start_seconds is None else f", startSeconds: {int(start_seconds)}",
@@ -74,13 +79,30 @@ def js_load_video(video_id: str, start_seconds: int | None) -> str:
     return js_call(f"p.loadVideoById({args}); return {{found:true}};")
 
 
-def js_load_playlist(list_id: str, index: int | None, start_seconds: int | None) -> str:
+def js_load_playlist(list_id: str, index: int | None, start_seconds: int | None,
+                     loop: bool = False) -> str:
     opts = [f"list: '{list_id}'", "listType: 'playlist'"]
     if index is not None:
         opts.append(f"index: {int(index)}")
     if start_seconds is not None:
         opts.append(f"startSeconds: {int(start_seconds)}")
-    return js_call("p.loadPlaylist({%s}); return {found:true};" % ", ".join(opts))
+    tail = " p.setLoop(true);" if loop else ""
+    return js_call("p.loadPlaylist({%s});%s return {found:true};" % (", ".join(opts), tail))
+
+
+def js_set_loop(enabled: bool) -> str:
+    if not enabled:
+        return js_call("p.setLoop(false); return {found:true};")
+    body = (
+        "const pl = (p.getPlaylist && p.getPlaylist()) || [];"
+        " if (pl.length > 0) { p.setLoop(true); return {found:true}; }"
+        " const d = p.getVideoData ? (p.getVideoData() || {}) : {};"
+        " const id = d.video_id;"
+        " if (!id) return {found:true, noVideo:true};"
+        " const t = p.getCurrentTime ? p.getCurrentTime() : 0;"
+        " p.loadPlaylist([id], 0, t); p.setLoop(true); return {found:true};"
+    )
+    return js_call(body)
 
 
 def js_simple(action: str) -> str:
