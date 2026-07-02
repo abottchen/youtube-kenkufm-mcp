@@ -45,3 +45,34 @@ def load_config(env: dict[str, str] | None = None) -> Config:
         view_match=env.get("YOUTUBE_VIEW_URL_MATCH", "youtube.com"),
         log_level=env.get("LOG_LEVEL", "INFO"),
     )
+
+
+def load_dotenv(path: str = ".env", environ: dict[str, str] | None = None) -> None:
+    """Populate ``environ`` (default ``os.environ``) from a ``.env`` file.
+
+    Supports ``KEY=value`` lines, ``#`` comments, blank lines, an optional
+    ``export`` prefix, and optional surrounding single/double quotes. Existing
+    variables are never overridden (the real environment always wins). A missing
+    file is a silent no-op, so ``.env`` is entirely optional.
+    """
+    target = os.environ if environ is None else environ
+    try:
+        with open(path, "r", encoding="utf-8") as handle:
+            content = handle.read()
+    except FileNotFoundError:
+        return
+    for line in content.splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line.startswith("export "):
+            line = line[len("export "):].lstrip()
+        key, sep, value = line.partition("=")
+        if not sep:
+            continue
+        key = key.strip()
+        value = value.strip()
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in ("'", '"'):
+            value = value[1:-1]
+        if key:
+            target.setdefault(key, value)

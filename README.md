@@ -40,23 +40,30 @@ logged-in Premium page, playback is ad-free and there are no embedding limits.
 
 ## Run
 
+Configuration is read from a `.env` file in the project directory (gitignored),
+falling back to real environment variables. Create one from the template:
+
 ```bash
-export YOUTUBE_MCP_AUTH_TOKEN=$(openssl rand -hex 32)   # save this
+cp .env.example .env
+# edit .env and set YOUTUBE_MCP_AUTH_TOKEN (generate one: openssl rand -hex 32)
+chmod 600 .env
+```
+
+Then start the server:
+
+```bash
 .venv/bin/python -m kenkufm_youtube_mcp
 # -> listening on http://127.0.0.1:3940/mcp
 ```
 
 ### As a systemd user service
 
+The service runs from the project directory and reads the same `.env` there, so
+no separate environment file is needed:
+
 ```bash
-mkdir -p ~/.config/systemd/user ~/.config/kenkufm-youtube-mcp
+mkdir -p ~/.config/systemd/user
 cp deploy/kenkufm-youtube-mcp.service ~/.config/systemd/user/
-cat > ~/.config/kenkufm-youtube-mcp/env <<EOF
-YOUTUBE_MCP_AUTH_TOKEN=$(openssl rand -hex 32)
-# YOUTUBE_MCP_PORT=3940
-# KENKU_CDP_URL=http://localhost:9222
-EOF
-chmod 600 ~/.config/kenkufm-youtube-mcp/env
 systemctl --user daemon-reload
 systemctl --user enable --now kenkufm-youtube-mcp
 ```

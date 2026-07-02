@@ -4,7 +4,7 @@ import asyncio
 import json
 import os
 
-from .config import Config
+from .config import Config, load_dotenv
 from .youtube import player
 
 
@@ -13,6 +13,7 @@ def main() -> None:
 
     Does NOT require YOUTUBE_MCP_AUTH_TOKEN (no server is started).
     """
+    load_dotenv()  # pick up KENKU_CDP_URL / YOUTUBE_VIEW_URL_MATCH from .env if present
     cfg = Config(
         auth_token="x" * 16,  # unused; smoke never starts the HTTP server
         cdp_url=os.environ.get("KENKU_CDP_URL", "http://localhost:9222"),
