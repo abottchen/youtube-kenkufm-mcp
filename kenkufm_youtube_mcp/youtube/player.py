@@ -145,17 +145,26 @@ async def get_state(cfg: Config) -> dict:
     return state
 
 
-async def play_video(cfg: Config, video_id: str, start_seconds: int | None = None) -> dict:
-    await _eval(cfg, js_load_video(video_id, start_seconds))
+async def play_video(cfg: Config, video_id: str, start_seconds: int | None = None,
+                     loop: bool = False) -> dict:
+    await _eval(cfg, js_load_video(video_id, start_seconds, loop))
     await asyncio.sleep(0.6)  # let the SPA swap in the new video before reading
     return await get_state(cfg)
 
 
 async def play_playlist(cfg: Config, list_id: str, index: int | None = None,
-                        start_seconds: int | None = None) -> dict:
-    await _eval(cfg, js_load_playlist(list_id, index, start_seconds))
+                        start_seconds: int | None = None, loop: bool = False) -> dict:
+    await _eval(cfg, js_load_playlist(list_id, index, start_seconds, loop))
     await asyncio.sleep(0.6)
     return await get_state(cfg)
+
+
+async def set_loop(cfg: Config, enabled: bool) -> dict:
+    result = await _eval(cfg, js_set_loop(enabled))
+    if isinstance(result, dict) and result.get("noVideo"):
+        raise InvalidInputError("No video is currently loaded to loop.")
+    await asyncio.sleep(0.6)  # enabling on a single video reloads it as a playlist
+    return {**(await get_state(cfg)), "loop": enabled}
 
 
 async def simple_action(cfg: Config, action: str) -> dict:

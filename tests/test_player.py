@@ -87,6 +87,52 @@ async def test_play_video_loads_then_reads_state(monkeypatch):
     assert out["state"] == "playing"
     assert any("loadVideoById" in c for c in calls)
 
+async def test_play_video_loop_uses_setloop(monkeypatch):
+    calls = []
+    async def fake_eval(cfg, expression, **kw):
+        calls.append(expression)
+        return {"found": True, "state": 1, "videoId": "DyhYzRRMBSU",
+                "isPlayable": True, "errorCode": None}
+    monkeypatch.setattr(player, "_eval", fake_eval)
+    async def no_sleep(*a, **k): return None
+    monkeypatch.setattr(player.asyncio, "sleep", no_sleep)
+
+    await player.play_video(CFG, "DyhYzRRMBSU", loop=True)
+    assert any("setLoop(true)" in c for c in calls)
+
+async def test_play_playlist_loop_uses_setloop(monkeypatch):
+    calls = []
+    async def fake_eval(cfg, expression, **kw):
+        calls.append(expression)
+        return {"found": True, "state": 1, "videoId": "x",
+                "isPlayable": True, "errorCode": None}
+    monkeypatch.setattr(player, "_eval", fake_eval)
+    async def no_sleep(*a, **k): return None
+    monkeypatch.setattr(player.asyncio, "sleep", no_sleep)
+
+    await player.play_playlist(CFG, "PLabc123", loop=True)
+    assert any("setLoop(true)" in c for c in calls)
+
+async def test_set_loop_echoes_enabled(monkeypatch):
+    async def fake_eval(cfg, expression, **kw):
+        return {"found": True, "state": 1, "videoId": "abc",
+                "isPlayable": True, "errorCode": None}
+    monkeypatch.setattr(player, "_eval", fake_eval)
+    async def no_sleep(*a, **k): return None
+    monkeypatch.setattr(player.asyncio, "sleep", no_sleep)
+
+    out = await player.set_loop(CFG, True)
+    assert out["loop"] is True
+    assert out["state"] == "playing"
+
+async def test_set_loop_no_video_raises(monkeypatch):
+    async def fake_eval(cfg, expression, **kw):
+        return {"found": True, "noVideo": True}
+    monkeypatch.setattr(player, "_eval", fake_eval)
+
+    with pytest.raises(InvalidInputError):
+        await player.set_loop(CFG, True)
+
 async def test_set_volume_out_of_range_raises():
     with pytest.raises(InvalidInputError):
         await player.set_volume(CFG, 150)
