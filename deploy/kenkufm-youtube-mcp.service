@@ -1,0 +1,14 @@
+[Unit]
+Description=kenkufm-youtube-mcp (control YouTube in Kenku FM via CDP)
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/projects/youtube-mcp
+EnvironmentFile=%h/.config/kenkufm-youtube-mcp/env
+ExecStart=%h/projects/youtube-mcp/.venv/bin/python -m kenkufm_youtube_mcp
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=default.target

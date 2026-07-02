@@ -1,0 +1,10 @@
+node_modules/
+build/
+dist/
+.env
+*.log
+.superpowers/
+docs/superpowers/
+.venv/
+__pycache__/
+*.pyc
