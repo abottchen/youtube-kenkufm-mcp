@@ -4,11 +4,12 @@ import logging
 
 import uvicorn
 
-from .config import ConfigError, load_config
+from .config import ConfigError, load_config, load_dotenv
 from .server import build_app
 
 
 def main() -> None:
+    load_dotenv()  # load .env from the current directory if present
     try:
         cfg = load_config()
     except ConfigError as exc:

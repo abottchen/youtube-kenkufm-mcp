@@ -5,7 +5,7 @@ After=network.target
 [Service]
 Type=simple
 WorkingDirectory=%h/projects/youtube-mcp
-EnvironmentFile=%h/.config/kenkufm-youtube-mcp/env
+# Config is read from the .env file in WorkingDirectory (see .env.example)
 ExecStart=%h/projects/youtube-mcp/.venv/bin/python -m kenkufm_youtube_mcp
 Restart=on-failure
 RestartSec=3
