@@ -86,10 +86,16 @@ Connect to `http://127.0.0.1:3940/mcp` with header
 
 ## Tools
 
-`get_playback_state`, `play_video`, `play_playlist`, `pause`, `resume`, `next`,
-`previous`, `seek`, `set_volume`, `mute`, `unmute`, `set_loop`.
+`get_playback_state`, `play_video`, `play_playlist`, `list_playlist`, `pause`,
+`resume`, `next`, `previous`, `seek`, `set_volume`, `mute`, `unmute`, `set_loop`.
 
 `play_video` accepts `loop=true` to repeat a single video infinitely, and
 `set_loop(enabled)` toggles looping of the currently playing video. Looping is
 single-video only (it uses the HTML5 `<video>.loop` property); looping a
 playlist is left to the client (e.g. replaying videos by ID).
+
+`list_playlist(playlist)` returns a playlist's videos — `videoId`, `title`, and
+watch `url` per item, plus `count` and a `truncated` flag — without changing
+what's playing. This lets a client loop a playlist itself: fetch the list, then
+replay each video by ID. Reads YouTube's internal data via an in-page request;
+long playlists are capped at 500 items.

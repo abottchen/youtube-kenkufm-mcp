@@ -5,6 +5,7 @@ from kenkufm_youtube_mcp.errors import (
     PlayerNotReadyError,
     InvalidInputError,
     VideoNotPlayableError,
+    PlaylistFetchError,
 )
 
 CFG = Config(auth_token="x" * 16)
@@ -261,3 +262,110 @@ def test_js_seek_contains_seek_to():
 
 def test_js_simple_pause_contains_pause_video():
     assert "pauseVideo" in player.js_simple("pause")
+
+# --- list_playlist: pure js builder ---
+def test_js_list_playlist_builds_fetch_expression():
+    js = player.js_list_playlist("PLabc123", 500)
+    assert "youtubei/v1/browse" in js  # InnerTube endpoint
+    assert "ytcfg" in js               # reads api key + context from the page
+    assert "'PLabc123'" in js          # validated list id, interpolated
+    assert "continuation" in js        # paginates through continuation tokens
+    assert "lockupViewModel" in js     # current playlist-item format
+    assert "playlistVideoRenderer" in js  # legacy fallback still handled
+
+def test_js_list_playlist_cap_is_integer_literal():
+    # cap is coerced to a bare int literal, never a quoted/raw string —
+    # keeps interpolation injection-safe.
+    js = player.js_list_playlist("PLabc123", 250)
+    assert "250" in js
+    assert "'250'" not in js
+
+def test_js_list_playlist_scopes_continuation_to_item_list():
+    # Regression: the continuation token must be taken from the array that holds
+    # the video items, not from any continuationItemViewModel anywhere in the
+    # response. A playlist page carries unrelated continuations (e.g. side
+    # sections); grabbing one of those stops pagination after page 1.
+    js = player.js_list_playlist("PLabc123", 500)
+    assert "isVideoItem" in js          # detects the video-list array
+    assert "node.some(isVideoItem)" in js  # token only from that array
+
+# --- list_playlist: async shaping/error-mapping (deps monkeypatched) ---
+async def test_list_playlist_shapes_videos(monkeypatch):
+    async def fake_resolve_ws(cfg):
+        return "ws://x"
+
+    async def fake_eval(ws_url, expression, **kw):
+        return {"ok": True, "title": "Tavern", "truncated": False, "videos": [
+            {"videoId": "abc12345678", "title": "Fire"},
+            {"videoId": "def12345678", "title": "Crackle"},
+        ]}
+
+    monkeypatch.setattr(player, "_resolve_ws", fake_resolve_ws)
+    monkeypatch.setattr(player.cdp_client, "evaluate", fake_eval)
+
+    out = await player.list_playlist(CFG, "PLabc123")
+    assert out["playlistId"] == "PLabc123"
+    assert out["title"] == "Tavern"
+    assert out["count"] == 2
+    assert out["truncated"] is False
+    assert out["videos"][0] == {
+        "videoId": "abc12345678",
+        "title": "Fire",
+        "url": "https://www.youtube.com/watch?v=abc12345678",
+    }
+    assert out["videos"][1]["videoId"] == "def12345678"
+
+async def test_list_playlist_passes_truncated_through(monkeypatch):
+    async def fake_resolve_ws(cfg):
+        return "ws://x"
+
+    async def fake_eval(ws_url, expression, **kw):
+        return {"ok": True, "title": "Big", "truncated": True, "videos": [
+            {"videoId": "abc12345678", "title": "x"},
+        ]}
+
+    monkeypatch.setattr(player, "_resolve_ws", fake_resolve_ws)
+    monkeypatch.setattr(player.cdp_client, "evaluate", fake_eval)
+
+    out = await player.list_playlist(CFG, "PLabc123")
+    assert out["truncated"] is True
+
+async def test_list_playlist_uses_extended_timeout(monkeypatch):
+    # The fetch loop can do several continuation round-trips, so this call must
+    # use a larger timeout than the 8s default.
+    seen = {}
+
+    async def fake_resolve_ws(cfg):
+        return "ws://x"
+
+    async def fake_eval(ws_url, expression, **kw):
+        seen.update(kw)
+        return {"ok": True, "title": "T", "truncated": False, "videos": [
+            {"videoId": "abc12345678", "title": "x"},
+        ]}
+
+    monkeypatch.setattr(player, "_resolve_ws", fake_resolve_ws)
+    monkeypatch.setattr(player.cdp_client, "evaluate", fake_eval)
+
+    await player.list_playlist(CFG, "PLabc123")
+    assert seen.get("timeout", 8.0) > 8.0
+
+@pytest.mark.parametrize("raw", [
+    {"ok": False, "reason": "notFound"},
+    {"ok": False, "reason": "notYouTube"},
+    {"ok": False, "reason": "parse"},
+    {"ok": False, "reason": "weird"},
+    None,
+])
+async def test_list_playlist_failure_raises(monkeypatch, raw):
+    async def fake_resolve_ws(cfg):
+        return "ws://x"
+
+    async def fake_eval(ws_url, expression, **kw):
+        return raw
+
+    monkeypatch.setattr(player, "_resolve_ws", fake_resolve_ws)
+    monkeypatch.setattr(player.cdp_client, "evaluate", fake_eval)
+
+    with pytest.raises(PlaylistFetchError):
+        await player.list_playlist(CFG, "PLabc123")

@@ -52,7 +52,7 @@ Each layer has one job:
 - **`config.py`** — frozen `Config` dataclass, `load_config` (validates token ≥16 chars,
   port range), and `load_dotenv`. **Real environment always wins over `.env`**
   (`os.environ.setdefault`); a missing `.env` is a silent no-op, so it's fully optional.
-- **`server.py`** — `build_mcp` defines the 12 FastMCP tools; `BearerAuthASGI` is a
+- **`server.py`** — `build_mcp` defines the 13 FastMCP tools; `BearerAuthASGI` is a
   pure-ASGI bearer-token wrapper; `build_app` composes them. Auth passes **non-HTTP scopes
   (lifespan, websocket) straight through** so the wrapped Starlette app's session-manager
   lifespan still runs — don't gate those or the server won't start.

@@ -22,8 +22,16 @@ async def test_set_loop_tool_registered_with_loop_params():
     names = {t.name for t in tools}
     assert "set_loop" in names
     assert {"play_video", "play_playlist"} <= names
-    assert len(tools) == 12
+    assert len(tools) == 13
     pv = next(t for t in tools if t.name == "play_video")
     assert "loop" in pv.inputSchema["properties"]
     sl = next(t for t in tools if t.name == "set_loop")
     assert "enabled" in sl.inputSchema["properties"]
+
+
+async def test_list_playlist_tool_registered():
+    mcp = server.build_mcp(Config(auth_token="x" * 16))
+    tools = await mcp.list_tools()
+    lp = next((t for t in tools if t.name == "list_playlist"), None)
+    assert lp is not None
+    assert "playlist" in lp.inputSchema["properties"]
