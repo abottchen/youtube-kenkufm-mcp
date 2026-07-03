@@ -83,6 +83,28 @@ def js_load_playlist(list_id: str, index: int | None, start_seconds: int | None)
     return js_call("p.loadPlaylist({%s}); return {found:true};" % ", ".join(opts))
 
 
+def js_set_loop(enabled: bool) -> str:
+    # Loop the current video via the HTML5 media element's `loop` property.
+    # The player's setLoop() does not loop on the Kenku watch page (neither a
+    # single video nor a playlist wraps — verified live), so it is not used;
+    # looping is single-video only. Playlist looping is left to the client.
+    #
+    # Scope the query to #movie_player's own <video> (a bare document query can
+    # hit an ad/mini-player node), guard getVideoData() like READ_JS does (it
+    # can throw mid-load), and treat the video as "loaded" when it has either a
+    # video_id or a media source — video_id is briefly absent right after a load.
+    flag = "true" if enabled else "false"
+    body = (
+        "const v = p.querySelector('video.html5-main-video')"
+        " || p.querySelector('video');"
+        " let d = {};"
+        " try { d = p.getVideoData() || {}; } catch (e) {}"
+        " if (!v || !(d.video_id || v.currentSrc)) return {found:true, noVideo:true};"
+        f" v.loop = {flag}; return {{found:true}};"
+    )
+    return js_call(body)
+
+
 def js_simple(action: str) -> str:
     return js_call(f"{_SIMPLE[action]} return {{found:true}};")
 
@@ -123,10 +145,20 @@ async def get_state(cfg: Config) -> dict:
     return state
 
 
-async def play_video(cfg: Config, video_id: str, start_seconds: int | None = None) -> dict:
+async def play_video(cfg: Config, video_id: str, start_seconds: int | None = None,
+                     loop: bool = False) -> dict:
     await _eval(cfg, js_load_video(video_id, start_seconds))
     await asyncio.sleep(0.6)  # let the SPA swap in the new video before reading
-    return await get_state(cfg)
+    state = await get_state(cfg)
+    applied = False
+    if loop:
+        # Set video.loop only after the player is ready — loadVideoById resets
+        # the media element's loop flag while the new video is loading. Reflect
+        # whether it actually took (the media element may not be ready yet)
+        # rather than reporting success blindly.
+        result = await _eval(cfg, js_set_loop(True))
+        applied = not (isinstance(result, dict) and result.get("noVideo"))
+    return {**state, "loop": applied}
 
 
 async def play_playlist(cfg: Config, list_id: str, index: int | None = None,
@@ -134,6 +166,15 @@ async def play_playlist(cfg: Config, list_id: str, index: int | None = None,
     await _eval(cfg, js_load_playlist(list_id, index, start_seconds))
     await asyncio.sleep(0.6)
     return await get_state(cfg)
+
+
+async def set_loop(cfg: Config, enabled: bool) -> dict:
+    result = await _eval(cfg, js_set_loop(enabled))
+    # Only enabling needs a loaded video; disabling is an idempotent no-op when
+    # nothing is loaded, so don't error on it.
+    if enabled and isinstance(result, dict) and result.get("noVideo"):
+        raise InvalidInputError("No video is currently loaded to loop.")
+    return {**(await get_state(cfg)), "loop": enabled}
 
 
 async def simple_action(cfg: Config, action: str) -> dict:
