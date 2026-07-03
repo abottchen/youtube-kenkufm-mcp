@@ -202,7 +202,7 @@ async def test_eval_retry_exhaustion_raises(monkeypatch):
     async def fake_resolve_ws(cfg):
         return "ws://x"
 
-    async def always_not_found(ws_url, expression):
+    async def always_not_found(ws_url, expression, **kw):
         return {"found": False}
 
     async def no_sleep(*a, **k):
@@ -221,7 +221,7 @@ async def test_eval_retry_recovers(monkeypatch):
     async def fake_resolve_ws(cfg):
         return "ws://x"
 
-    async def flaky_evaluate(ws_url, expression):
+    async def flaky_evaluate(ws_url, expression, **kw):
         calls.append(expression)
         if len(calls) <= 3:
             return {"found": False}
@@ -288,6 +288,22 @@ def test_js_list_playlist_scopes_continuation_to_item_list():
     js = player.js_list_playlist("PLabc123", 500)
     assert "isVideoItem" in js          # detects the video-list array
     assert "node.some(isVideoItem)" in js  # token only from that array
+
+def test_js_list_playlist_collects_only_the_first_video_array():
+    # Regression: a page may also carry a recommended/related shelf of video
+    # items. Only the first (primary) video array is collected, so that shelf
+    # can't inflate the list or overwrite the pagination token.
+    js = player.js_list_playlist("PLabc123", 500)
+    assert "primaryCollected" in js
+
+def test_js_list_playlist_truncated_covers_failure_and_overshoot():
+    # Regression: truncated must be true when a continuation fetch fails
+    # mid-run, when a page overshoots the cap, or when a token remains — not
+    # `!!token` alone, which misses the first two and silently returns a
+    # partial list as complete.
+    js = player.js_list_playlist("PLabc123", 500)
+    assert "incomplete" in js                 # failed-mid-pagination signal
+    assert "incomplete || !!token || videos.length > CAP" in js
 
 # --- list_playlist: async shaping/error-mapping (deps monkeypatched) ---
 async def test_list_playlist_shapes_videos(monkeypatch):

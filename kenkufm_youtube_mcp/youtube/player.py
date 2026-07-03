@@ -17,6 +17,8 @@ STATE_NAMES = {-1: "unstarted", 0: "ended", 1: "playing", 2: "paused",
 
 # Stop paginating a playlist after this many items (safety bound on very long
 # playlists). If more remain, list_playlist flags the result truncated.
+# NOTE: this number is also stated in prose in server.list_playlist's docstring
+# and in README.md — keep those in sync if you change it.
 PLAYLIST_ITEM_CAP = 500
 # The playlist fetch loop can do several continuation round-trips, so it needs a
 # larger ceiling than cdp_client.evaluate's 8s default.
@@ -140,6 +142,11 @@ def js_list_playlist(list_id: str, cap: int) -> str:
       return null;
     };
 
+    // A renderer title may be a bare string or a {simpleText|runs} object,
+    // depending on era — normalize both to a plain string (or null).
+    const asText = (t) => (typeof t === 'string' ? t
+      : (t && (t.simpleText || (t.runs && t.runs[0] && t.runs[0].text))) || null);
+
     // Is this array element a playlist video item (either format)?
     const isVideoItem = (x) => !!(x && typeof x === 'object' && (
       (x.lockupViewModel && x.lockupViewModel.contentType === 'LOCKUP_CONTENT_TYPE_VIDEO'
@@ -158,17 +165,24 @@ def js_list_playlist(list_id: str, cap: int) -> str:
       }
     };
 
+    let primaryCollected = false;
     const walk = (node) => {
       if (!node || typeof node !== 'object') return;
       if (Array.isArray(node)) {
         if (node.some(isVideoItem)) {
-          // This array is a playlist item list: collect its videos and take the
-          // continuation token from its sibling continuation entry only.
-          for (const x of node) {
-            if (isVideoItem(x)) pushItem(x);
-            else if (x && (x.continuationItemViewModel || x.continuationItemRenderer)) {
-              const tok = findToken(x.continuationItemViewModel || x.continuationItemRenderer);
-              if (tok) token = tok;
+          // The first video-item array in a page is the playlist's own list:
+          // collect only from it, and take the continuation token only from its
+          // sibling continuation entry. A page can also carry a recommended /
+          // related shelf of video items; pulling those in would inflate the
+          // result and hijack pagination onto the wrong feed.
+          if (!primaryCollected) {
+            primaryCollected = true;
+            for (const x of node) {
+              if (isVideoItem(x)) pushItem(x);
+              else if (x && (x.continuationItemViewModel || x.continuationItemRenderer)) {
+                const tok = findToken(x.continuationItemViewModel || x.continuationItemRenderer);
+                if (tok) token = tok;
+              }
             }
           }
           return;
@@ -176,15 +190,21 @@ def js_list_playlist(list_id: str, cap: int) -> str:
         for (const x of node) walk(x);
         return;
       }
-      if (title === null && node.playlistMetadataRenderer && node.playlistMetadataRenderer.title) {
-        title = node.playlistMetadataRenderer.title;
+      if (title === null && node.playlistMetadataRenderer) {
+        title = asText(node.playlistMetadataRenderer.title);
       }
       if (title === null && node.playlistHeaderRenderer) {
-        const h = node.playlistHeaderRenderer.title;
-        title = (h && (h.simpleText || (h.runs && h.runs[0] && h.runs[0].text))) || null;
+        title = asText(node.playlistHeaderRenderer.title);
+      }
+      if (title === null && node.pageHeaderRenderer
+          && typeof node.pageHeaderRenderer.pageTitle === 'string') {
+        title = node.pageHeaderRenderer.pageTitle;
       }
       for (const k in node) walk(node[k]);
     };
+
+    // Reset the per-page "primary list already taken" latch before each page.
+    const collectPage = (node) => { primaryCollected = false; walk(node); };
 
     const post = async (body) => {
       const resp = await fetch('/youtubei/v1/browse?key=' + encodeURIComponent(key), {
@@ -198,18 +218,23 @@ def js_list_playlist(list_id: str, cap: int) -> str:
 
     let data = await post({context, browseId: 'VL' + listId});
     if (!data) return {ok:false, reason:'notFound'};
-    walk(data);
+    collectPage(data);
     if (videos.length === 0) return {ok:false, reason:'notFound'};
 
+    let incomplete = false;
     while (token && videos.length < CAP) {
       const next = token;
       token = null;
       data = await post({context, continuation: next});
-      if (!data) break;
-      walk(data);
+      if (!data) { incomplete = true; break; }  // a page failed to load mid-run
+      collectPage(data);
     }
+    // The list is truncated if a continuation fetch failed part-way, more pages
+    // remained when we hit the CAP, or a page overshot the CAP (tail dropped
+    // below). Deriving this from `token` alone would miss the first and third.
+    const truncated = incomplete || !!token || videos.length > CAP;
     if (videos.length > CAP) videos.length = CAP;
-    return {ok:true, title, videos, truncated: !!token};
+    return {ok:true, title, videos, truncated};
   } catch (e) {
     return {ok:false, reason:'parse'};
   }
@@ -255,10 +280,11 @@ async def _resolve_ws(cfg: Config) -> str:
     return cdp_targets.select_youtube_target(targets, cfg.view_match)
 
 
-async def _eval(cfg: Config, expression: str, retries: int = 6, delay: float = 0.5):
+async def _eval(cfg: Config, expression: str, retries: int = 6, delay: float = 0.5,
+                timeout: float = 8.0):
     ws_url = await _resolve_ws(cfg)
     for _ in range(retries):
-        result = await cdp_client.evaluate(ws_url, expression)
+        result = await cdp_client.evaluate(ws_url, expression, timeout=timeout)
         if isinstance(result, dict) and result.get("found") is False:
             await asyncio.sleep(delay)
             continue
@@ -322,11 +348,10 @@ async def list_playlist(cfg: Config, list_id: str) -> dict:
 
     Reads the playlist out-of-band via an in-page fetch (see js_list_playlist),
     so #movie_player is never touched. Returns
-    {playlistId, title, count, truncated, videos:[{videoId, title, url, isPlayable}]}.
+    {playlistId, title, count, truncated, videos:[{videoId, title, url}]}.
     """
-    ws_url = await _resolve_ws(cfg)
-    raw = await cdp_client.evaluate(
-        ws_url, js_list_playlist(list_id, PLAYLIST_ITEM_CAP),
+    raw = await _eval(
+        cfg, js_list_playlist(list_id, PLAYLIST_ITEM_CAP),
         timeout=PLAYLIST_EVAL_TIMEOUT,
     )
     if not (isinstance(raw, dict) and raw.get("ok")):
