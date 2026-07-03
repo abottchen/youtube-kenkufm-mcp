@@ -39,16 +39,13 @@ def build_mcp(cfg: Config) -> FastMCP:
 
     @mcp.tool()
     async def play_playlist(playlist: str, index: int | None = None,
-                            start_seconds: int | None = None, loop: bool = False) -> dict:
-        """Load and play a YouTube playlist by URL or playlist ID (list=...).
-
-        Set loop=True to repeat the whole playlist infinitely.
-        """
+                            start_seconds: int | None = None) -> dict:
+        """Load and play a YouTube playlist by URL or playlist ID (list=...)."""
         try:
             list_id = ids.parse_playlist_id(playlist)
         except KenkuYoutubeError as exc:
             return {"error": str(exc)}
-        return await _guard(player.play_playlist(cfg, list_id, index, start_seconds, loop))
+        return await _guard(player.play_playlist(cfg, list_id, index, start_seconds))
 
     @mcp.tool()
     async def pause() -> dict:
@@ -92,7 +89,7 @@ def build_mcp(cfg: Config) -> FastMCP:
 
     @mcp.tool()
     async def set_loop(enabled: bool) -> dict:
-        """Turn infinite looping on or off for the current video/playlist."""
+        """Turn infinite looping of the currently playing video on or off."""
         return await _guard(player.set_loop(cfg, enabled))
 
     return mcp

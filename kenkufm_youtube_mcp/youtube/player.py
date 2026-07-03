@@ -74,27 +74,23 @@ def js_load_video(video_id: str, start_seconds: int | None) -> str:
     return js_call(f"p.loadVideoById({args}); return {{found:true}};")
 
 
-def js_load_playlist(list_id: str, index: int | None, start_seconds: int | None,
-                     loop: bool = False) -> str:
+def js_load_playlist(list_id: str, index: int | None, start_seconds: int | None) -> str:
     opts = [f"list: '{list_id}'", "listType: 'playlist'"]
     if index is not None:
         opts.append(f"index: {int(index)}")
     if start_seconds is not None:
         opts.append(f"startSeconds: {int(start_seconds)}")
-    tail = " p.setLoop(true);" if loop else ""
-    return js_call("p.loadPlaylist({%s});%s return {found:true};" % (", ".join(opts), tail))
+    return js_call("p.loadPlaylist({%s}); return {found:true};" % ", ".join(opts))
 
 
 def js_set_loop(enabled: bool) -> str:
-    # A single video is looped via the HTML5 media element's `loop` property
-    # (setLoop only loops a real, multi-item playlist and is a no-op on one video
-    # — verified against the live watch-page player). A real playlist keeps the
-    # native setLoop so the whole sequence repeats.
+    # Loop the current video via the HTML5 media element's `loop` property.
+    # The player's setLoop() does not loop on the Kenku watch page (neither a
+    # single video nor a playlist wraps — verified live), so it is not used;
+    # looping is single-video only. Playlist looping is left to the client.
     flag = "true" if enabled else "false"
     body = (
         "const v = document.querySelector('video');"
-        " const pl = (p.getPlaylist && p.getPlaylist()) || [];"
-        f" if (pl.length > 1) {{ p.setLoop({flag}); if (v) v.loop = false; return {{found:true}}; }}"
         " if (!v) return {found:true, noVideo:true};"
         " const d = p.getVideoData ? (p.getVideoData() || {}) : {};"
         " if (!d.video_id) return {found:true, noVideo:true};"
@@ -156,8 +152,8 @@ async def play_video(cfg: Config, video_id: str, start_seconds: int | None = Non
 
 
 async def play_playlist(cfg: Config, list_id: str, index: int | None = None,
-                        start_seconds: int | None = None, loop: bool = False) -> dict:
-    await _eval(cfg, js_load_playlist(list_id, index, start_seconds, loop))
+                        start_seconds: int | None = None) -> dict:
+    await _eval(cfg, js_load_playlist(list_id, index, start_seconds))
     await asyncio.sleep(0.6)
     return await get_state(cfg)
 

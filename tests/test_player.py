@@ -38,32 +38,23 @@ def test_js_load_video_never_uses_playlist():
     assert "loadVideoById" in js
     assert "loadPlaylist" not in js
 
-def test_js_load_playlist_loop_appends_setloop():
-    js = player.js_load_playlist("PLabc123", None, None, loop=True)
-    assert "loadPlaylist" in js and "setLoop(true)" in js
-
-def test_js_load_playlist_no_loop_has_no_setloop():
+def test_js_load_playlist_has_no_setloop():
+    # Playlist looping is out of scope — setLoop does not loop on the watch page.
     js = player.js_load_playlist("PLabc123", None, None)
     assert "setLoop" not in js
 
-def test_js_set_loop_true_single_video_uses_video_loop():
-    # A single video loops via the HTML5 media element, never loadPlaylist.
+def test_js_set_loop_true_uses_video_loop():
+    # Looping is single-video only, via the HTML5 media element.
     js = player.js_set_loop(True)
     assert "v.loop = true" in js
     assert "loadPlaylist" not in js
+    assert "setLoop" not in js
     assert "noVideo" in js
 
-def test_js_set_loop_true_real_playlist_uses_setloop():
-    # A real (multi-item) playlist loops via native setLoop.
-    js = player.js_set_loop(True)
-    assert "getPlaylist" in js
-    assert "pl.length > 1" in js
-    assert "p.setLoop(true)" in js
-
-def test_js_set_loop_false_disables_both_paths():
+def test_js_set_loop_false_disables_video_loop():
     js = player.js_set_loop(False)
     assert "v.loop = false" in js
-    assert "p.setLoop(false)" in js
+    assert "setLoop" not in js
     assert "loadPlaylist" not in js
 
 def test_js_set_volume_coerces_int():
@@ -115,7 +106,7 @@ async def test_play_video_no_loop_skips_loop_eval(monkeypatch):
     await player.play_video(CFG, "DyhYzRRMBSU", loop=False)
     assert not any("v.loop" in c for c in calls)
 
-async def test_play_playlist_loop_uses_setloop(monkeypatch):
+async def test_play_playlist_loads_without_loop(monkeypatch):
     calls = []
     async def fake_eval(cfg, expression, **kw):
         calls.append(expression)
@@ -125,8 +116,9 @@ async def test_play_playlist_loop_uses_setloop(monkeypatch):
     async def no_sleep(*a, **k): return None
     monkeypatch.setattr(player.asyncio, "sleep", no_sleep)
 
-    await player.play_playlist(CFG, "PLabc123", loop=True)
-    assert any("setLoop(true)" in c for c in calls)
+    await player.play_playlist(CFG, "PLabc123")
+    assert any("loadPlaylist" in c for c in calls)
+    assert not any("setLoop" in c for c in calls)  # no playlist looping
 
 async def test_set_loop_echoes_enabled_and_builds_video_loop(monkeypatch):
     calls = []

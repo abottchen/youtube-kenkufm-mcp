@@ -89,5 +89,7 @@ Connect to `http://127.0.0.1:3940/mcp` with header
 `get_playback_state`, `play_video`, `play_playlist`, `pause`, `resume`, `next`,
 `previous`, `seek`, `set_volume`, `mute`, `unmute`, `set_loop`.
 
-`play_video` and `play_playlist` accept `loop=true` to repeat infinitely;
-`set_loop(enabled)` toggles looping on whatever is currently playing.
+`play_video` accepts `loop=true` to repeat a single video infinitely, and
+`set_loop(enabled)` toggles looping of the currently playing video. Looping is
+single-video only (it uses the HTML5 `<video>.loop` property); looping a
+playlist is left to the client (e.g. replaying videos by ID).
