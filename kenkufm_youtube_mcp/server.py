@@ -48,6 +48,20 @@ def build_mcp(cfg: Config) -> FastMCP:
         return await _guard(player.play_playlist(cfg, list_id, index, start_seconds))
 
     @mcp.tool()
+    async def list_playlist(playlist: str) -> dict:
+        """List the videos (ID, title, watch URL) in a YouTube playlist.
+
+        Takes a playlist URL or ID (list=...). Reads the playlist without
+        changing what's currently playing. Long playlists are capped at 500
+        items; the result sets truncated=true if more were left unread.
+        """
+        try:
+            list_id = ids.parse_playlist_id(playlist)
+        except KenkuYoutubeError as exc:
+            return {"error": str(exc)}
+        return await _guard(player.list_playlist(cfg, list_id))
+
+    @mcp.tool()
     async def pause() -> dict:
         """Pause playback."""
         return await _guard(player.simple_action(cfg, "pause"))

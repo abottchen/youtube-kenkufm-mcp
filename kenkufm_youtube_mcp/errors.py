@@ -23,3 +23,7 @@ class VideoNotPlayableError(KenkuYoutubeError):
 
 class InvalidInputError(KenkuYoutubeError):
     """A tool argument could not be parsed/validated."""
+
+
+class PlaylistFetchError(KenkuYoutubeError):
+    """A playlist's contents could not be fetched or parsed from YouTube."""
