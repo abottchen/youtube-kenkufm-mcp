@@ -57,6 +57,16 @@ def test_js_set_loop_false_disables_video_loop():
     assert "setLoop" not in js
     assert "loadPlaylist" not in js
 
+def test_js_set_loop_scopes_query_and_guards_getvideodata():
+    # Scope the <video> lookup to #movie_player (not a bare document query that
+    # could hit an ad/mini-player node), and guard getVideoData() in try/catch
+    # like READ_JS since it can throw mid-load.
+    js = player.js_set_loop(True)
+    assert "p.querySelector('video" in js
+    assert "document.querySelector('video')" not in js
+    assert "try {" in js and "getVideoData()" in js
+    assert "currentSrc" in js  # "loaded" allows a media source, not just video_id
+
 def test_js_set_volume_coerces_int():
     assert "setVolume(50)" in player.js_set_volume(50)
 
@@ -89,9 +99,25 @@ async def test_play_video_loop_sets_video_loop(monkeypatch):
     async def no_sleep(*a, **k): return None
     monkeypatch.setattr(player.asyncio, "sleep", no_sleep)
 
-    await player.play_video(CFG, "DyhYzRRMBSU", loop=True)
+    out = await player.play_video(CFG, "DyhYzRRMBSU", loop=True)
     assert any("loadVideoById" in c for c in calls)  # reliable load path
     assert any("v.loop = true" in c for c in calls)   # loop applied after load
+    assert out["loop"] is True  # return reflects that looping was applied
+
+async def test_play_video_loop_not_applied_reports_false(monkeypatch):
+    # If the media element isn't ready when the loop eval runs, js_set_loop
+    # returns noVideo — play_video must report loop=False, not blind success.
+    async def fake_eval(cfg, expression, **kw):
+        if "v.loop" in expression:
+            return {"found": True, "noVideo": True}
+        return {"found": True, "state": 1, "videoId": "DyhYzRRMBSU",
+                "isPlayable": True, "errorCode": None}
+    monkeypatch.setattr(player, "_eval", fake_eval)
+    async def no_sleep(*a, **k): return None
+    monkeypatch.setattr(player.asyncio, "sleep", no_sleep)
+
+    out = await player.play_video(CFG, "DyhYzRRMBSU", loop=True)
+    assert out["loop"] is False
 
 async def test_play_video_no_loop_skips_loop_eval(monkeypatch):
     calls = []
@@ -103,8 +129,9 @@ async def test_play_video_no_loop_skips_loop_eval(monkeypatch):
     async def no_sleep(*a, **k): return None
     monkeypatch.setattr(player.asyncio, "sleep", no_sleep)
 
-    await player.play_video(CFG, "DyhYzRRMBSU", loop=False)
+    out = await player.play_video(CFG, "DyhYzRRMBSU", loop=False)
     assert not any("v.loop" in c for c in calls)
+    assert out["loop"] is False  # consistent, self-describing return shape
 
 async def test_play_playlist_loads_without_loop(monkeypatch):
     calls = []
@@ -152,6 +179,18 @@ async def test_set_loop_no_video_raises(monkeypatch):
 
     with pytest.raises(InvalidInputError):
         await player.set_loop(CFG, True)
+
+async def test_set_loop_disable_no_video_is_noop(monkeypatch):
+    # Disabling looping when nothing is loaded is idempotent — it must not raise.
+    async def fake_eval(cfg, expression, **kw):
+        if "v.loop" in expression:
+            return {"found": True, "noVideo": True}
+        return {"found": True, "state": -1, "videoId": None,
+                "isPlayable": None, "errorCode": None}
+    monkeypatch.setattr(player, "_eval", fake_eval)
+
+    out = await player.set_loop(CFG, False)
+    assert out["loop"] is False
 
 async def test_set_volume_out_of_range_raises():
     with pytest.raises(InvalidInputError):
