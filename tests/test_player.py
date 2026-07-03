@@ -305,6 +305,15 @@ def test_js_list_playlist_truncated_covers_failure_and_overshoot():
     assert "incomplete" in js                 # failed-mid-pagination signal
     assert "incomplete || !!token || videos.length > CAP" in js
 
+def test_js_list_playlist_authenticates_request():
+    # Regression: private/unlisted (owner-only) playlists 403 with
+    # PERMISSION_DENIED unless the InnerTube POST carries the page's
+    # SAPISIDHASH auth header, derived from the session cookie.
+    js = player.js_list_playlist("PLabc123", 500)
+    assert "SAPISIDHASH" in js       # auth scheme
+    assert "SAPISID" in js           # reads the session cookie
+    assert "Authorization" in js     # sets the auth header on the fetch
+
 # --- list_playlist: async shaping/error-mapping (deps monkeypatched) ---
 async def test_list_playlist_shapes_videos(monkeypatch):
     async def fake_resolve_ws(cfg):
@@ -369,6 +378,7 @@ async def test_list_playlist_uses_extended_timeout(monkeypatch):
 @pytest.mark.parametrize("raw", [
     {"ok": False, "reason": "notFound"},
     {"ok": False, "reason": "notYouTube"},
+    {"ok": False, "reason": "forbidden"},
     {"ok": False, "reason": "parse"},
     {"ok": False, "reason": "weird"},
     None,
@@ -385,3 +395,19 @@ async def test_list_playlist_failure_raises(monkeypatch, raw):
 
     with pytest.raises(PlaylistFetchError):
         await player.list_playlist(CFG, "PLabc123")
+
+async def test_list_playlist_forbidden_has_distinct_message(monkeypatch):
+    # A 403 (private playlist, session not authorized) maps to its own message,
+    # not the generic notFound/parse text.
+    async def fake_resolve_ws(cfg):
+        return "ws://x"
+
+    async def fake_eval(ws_url, expression, **kw):
+        return {"ok": False, "reason": "forbidden"}
+
+    monkeypatch.setattr(player, "_resolve_ws", fake_resolve_ws)
+    monkeypatch.setattr(player.cdp_client, "evaluate", fake_eval)
+
+    with pytest.raises(PlaylistFetchError) as ei:
+        await player.list_playlist(CFG, "PLabc123")
+    assert "signed in" in str(ei.value).lower()

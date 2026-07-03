@@ -133,6 +133,24 @@ def js_list_playlist(list_id: str, cap: int) -> str:
     let title = null;
     let token = null;
 
+    // YouTube's InnerTube API treats a bare {context, key} POST as logged-out,
+    // so private / unlisted (owner-only) playlists 403 with PERMISSION_DENIED.
+    // Authenticate the way the page itself does: an
+    //   Authorization: SAPISIDHASH <ts>_<sha1(ts + ' ' + SAPISID + ' ' + origin)>
+    // header derived from the session cookie. Public playlists work either way;
+    // if no cookie is available we simply omit it and stay logged-out.
+    const origin = location.origin;
+    const cookie = (n) => (document.cookie.match(new RegExp('(?:^|; )' + n + '=([^;]+)')) || [])[1];
+    const sapisid = cookie('SAPISID') || cookie('__Secure-3PAPISID') || cookie('__Secure-1PAPISID');
+    let auth = null;
+    if (sapisid && typeof crypto !== 'undefined' && crypto.subtle) {
+      const ts = Math.floor(Date.now() / 1000);
+      const digest = await crypto.subtle.digest(
+        'SHA-1', new TextEncoder().encode(ts + ' ' + sapisid + ' ' + origin));
+      const hex = Array.from(new Uint8Array(digest)).map((b) => b.toString(16).padStart(2, '0')).join('');
+      auth = 'SAPISIDHASH ' + ts + '_' + hex;
+    }
+
     // Find a continuation `token` string anywhere under a node — robust to the
     // exact nesting (the view-model era buries it deeper than the old renderer).
     const findToken = (n) => {
@@ -206,18 +224,22 @@ def js_list_playlist(list_id: str, cap: int) -> str:
     // Reset the per-page "primary list already taken" latch before each page.
     const collectPage = (node) => { primaryCollected = false; walk(node); };
 
+    let lastStatus = 0;
     const post = async (body) => {
+      const headers = {'Content-Type': 'application/json'};
+      if (auth) { headers['Authorization'] = auth; headers['X-Goog-AuthUser'] = '0'; headers['X-Origin'] = origin; }
       const resp = await fetch('/youtubei/v1/browse?key=' + encodeURIComponent(key), {
         method: 'POST',
-        headers: {'Content-Type': 'application/json'},
+        headers,
         body: JSON.stringify(body),
       });
+      lastStatus = resp.status;
       if (!resp.ok) return null;
       return await resp.json();
     };
 
     let data = await post({context, browseId: 'VL' + listId});
-    if (!data) return {ok:false, reason:'notFound'};
+    if (!data) return {ok:false, reason: lastStatus === 403 ? 'forbidden' : 'notFound'};
     collectPage(data);
     if (videos.length === 0) return {ok:false, reason:'notFound'};
 
@@ -335,6 +357,11 @@ _PLAYLIST_FETCH_MESSAGES = {
     "notFound": (
         "Playlist not found or not accessible — it may be private, empty, or "
         "the ID may be wrong."
+    ),
+    "forbidden": (
+        "The playlist is private or unlisted and the Kenku YouTube session "
+        "isn't authorized to read it. Make sure Kenku is signed in to the "
+        "account that owns the playlist."
     ),
     "parse": (
         "Could not read the playlist data from YouTube (unexpected response "
